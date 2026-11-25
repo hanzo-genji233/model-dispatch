@@ -1,0 +1,8 @@
+{
+  "gemini_models": [],
+  "codex_models": [],
+  "codex_effort": "high",
+  "fast_base_url": "https://api.deepseek.com/v1",
+  "fast_model": "deepseek-chat",
+  "sensitive_markers": ["把你的客户名", "项目代号", "内部域名写在这里"]
+}
