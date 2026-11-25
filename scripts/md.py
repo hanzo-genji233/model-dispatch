@@ -182,35 +182,49 @@ def collect_guard_texts(
     return out
 
 
-# 目录内容扫描上限：外部模型能在目录里读到的文件，名字和内容都要过敏感词
+# 目录内容扫描上限：外部模型能在目录里读到的文件，名字和内容都要过敏感词。
+# 扫不完（超上限）就默认拦截，不静默放行；确认能外发再加 --allow-sensitive。
 _SCAN_MAX_FILES = 5000
-_SCAN_MAX_FILE_BYTES = 1_000_000
 _SCAN_MAX_TOTAL_BYTES = 50_000_000
 _SCAN_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache"}
+_SCAN_INCOMPLETE = "\x00md-scan-incomplete:"
 
 
 def _dir_texts(root: Path) -> list[str]:
-    """目录里的文件名 + 文本文件内容（含 gitignore 掉的文件，模型一样读得到）。跳过二进制和超大文件。"""
+    """目录里的文件名 + 文本文件内容（含 gitignore 掉的文件、符号链接指向的文件，模型一样读得到）。
+
+    只跳过二进制文件。超过文件数或总字节上限时，在结果里放一条「没扫完」标记，sensitive_guard 见到就拦截。
+    """
     names: list[str] = []
     contents: list[str] = []
     total = 0
     count = 0
-    for dirpath, dirnames, filenames in os.walk(root):
+    seen_dirs: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        real = os.path.realpath(dirpath)
+        if real in seen_dirs:  # 符号链接成环
+            dirnames[:] = []
+            continue
+        seen_dirs.add(real)
         dirnames[:] = [d for d in dirnames if d not in _SCAN_SKIP_DIRS]
         names.append(os.path.relpath(dirpath, root))
         for fn in filenames:
             count += 1
             if count > _SCAN_MAX_FILES:
                 contents.append("\n".join(names))
-                print(f"[md] 敏感词扫描：目录文件超过 {_SCAN_MAX_FILES} 个，只扫了前面的部分", file=sys.stderr)
+                contents.append(f"{_SCAN_INCOMPLETE}目录里文件超过 {_SCAN_MAX_FILES} 个")
                 return contents
             names.append(fn)
-            fp = Path(dirpath) / fn
+            fp = Path(dirpath) / fn  # 符号链接也读：read_bytes 会跟到真实文件
             try:
-                if fp.is_symlink() or fp.stat().st_size > _SCAN_MAX_FILE_BYTES:
-                    continue
-                if total >= _SCAN_MAX_TOTAL_BYTES:
-                    continue
+                size = fp.stat().st_size
+            except OSError:
+                continue  # 断链或读不了：模型也读不到
+            if total + size > _SCAN_MAX_TOTAL_BYTES:
+                contents.append("\n".join(names))
+                contents.append(f"{_SCAN_INCOMPLETE}目录文本超过 {_SCAN_MAX_TOTAL_BYTES // 1_000_000} MB")
+                return contents
+            try:
                 data = fp.read_bytes()
             except OSError:
                 continue
@@ -229,6 +243,13 @@ def sensitive_guard(texts: list[str], allowed: bool, who: str) -> None:
     markers = [m.lower() for m in as_list(cfg().get("sensitive_markers"))]
     if not markers:
         return
+    incomplete = [t[len(_SCAN_INCOMPLETE):] for t in texts if t.startswith(_SCAN_INCOMPLETE)]
+    if incomplete:
+        die(
+            f"拦截：{incomplete[0]}，敏感词没法扫完，会发给 {who}。\n"
+            "确认目录里没有不能外发的资料后，加 --allow-sensitive 重跑；或者把任务目录缩小再派。",
+            code=3,
+        )
     blob = "\n".join(texts).lower()
     hits = sorted({m for m in markers if m in blob})
     if hits:

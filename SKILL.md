@@ -51,7 +51,7 @@ description: "多模型分工派活：总指挥（通常是 Claude Code）把活
 - `gemini_cmd`：顾问命令模板。想换成别的命令行 agent，改这里。
 - `codex_models`、`codex_effort`：Codex 模型和推理档位。
 - `fast_base_url`、`fast_model`、`fast_key_env`：快模型接口。
-- `sensitive_markers`：客户名、项目代号等。命中就拒绝外发。扫描范围：任务文字、点名的文件、git remote，以及目标目录里所有文本文件的名字和内容（含 gitignore 掉的；跳过二进制、单个超过 1 MB 的文件、`.git` / `node_modules` 等）。
+- `sensitive_markers`：客户名、项目代号等。命中就拒绝外发。扫描范围：任务文字、点名的文件、git remote，以及目标目录里所有文本文件的名字和内容（含 gitignore 掉的、符号链接指向的；只跳过二进制文件和 `.git` / `node_modules` / `.venv` 等目录）。目录超过 5000 个文件或 50 MB 文本时扫不完，默认拦截（退出码 3），确认能外发再加 `--allow-sensitive`。
 
 ## 记录
 

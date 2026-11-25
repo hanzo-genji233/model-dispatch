@@ -15,6 +15,8 @@ python3 scripts/test_md.py
 9. 审查结果包在 ```json 里也能读；字段不全判失败
 10. Codex 额度用完的报错在标准输出的 JSON 事件里，失败信息要把它说出来
 11. 敏感词藏在目录里某个文件的正文里（文件名不含、甚至被 gitignore），也要拦住
+12. 符号链接指向目录外的客户文件、超过 1 MB 的大文件，也要扫到
+13. 目录太大扫不完（文件数或总字节超上限）时默认拦截，不静默放行
 """
 from __future__ import annotations
 
@@ -189,6 +191,47 @@ class GuardTests(unittest.TestCase):
         (repo / "docs" / "会议.md").write_text("普通内容")
         self.write_cfg(sensitive_markers=["globex"])  # 只在二进制里出现：不拦
         md.sensitive_guard(md.collect_guard_texts(["x"], target_dir=repo, include_dir_files=True), False, "X")
+
+    def test_sensitive_via_symlink_and_big_file(self) -> None:
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "客户.md").write_text("Globex 合同")
+        (outside / "sub").mkdir()
+        (outside / "sub" / "x.md").write_text("initech")
+        repo = self.root / "proj3"
+        repo.mkdir()
+        (repo / "brief.md").symlink_to(outside / "客户.md")
+        self.write_cfg(sensitive_markers=["globex"])
+        with self.assertRaises(SystemExit) as cm, redirect_stderr(io.StringIO()):
+            md.sensitive_guard(md.collect_guard_texts(["x"], target_dir=repo, include_dir_files=True), False, "X")
+        self.assertEqual(cm.exception.code, 3)
+        (repo / "brief.md").unlink()
+        (repo / "linked").symlink_to(outside / "sub", target_is_directory=True)  # 目录链接
+        self.write_cfg(sensitive_markers=["initech"])
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            md.sensitive_guard(md.collect_guard_texts(["x"], target_dir=repo, include_dir_files=True), False, "X")
+        (repo / "linked").unlink()
+        (repo / "big.log").write_text("a" * 2_000_000 + "Globex")
+        self.write_cfg(sensitive_markers=["globex"])
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            md.sensitive_guard(md.collect_guard_texts(["x"], target_dir=repo, include_dir_files=True), False, "X")
+
+    def test_scan_limits_fail_closed(self) -> None:
+        repo = self.root / "proj4"
+        repo.mkdir()
+        for i in range(5):
+            (repo / f"f{i}.txt").write_text("普通内容 " * 10)
+        self.write_cfg(sensitive_markers=["globex"])
+        md.sensitive_guard(md.collect_guard_texts(["x"], target_dir=repo, include_dir_files=True), False, "X")
+        for patch in ({"_SCAN_MAX_FILES": 3}, {"_SCAN_MAX_TOTAL_BYTES": 100}):
+            with mock.patch.multiple(md, **patch):
+                texts = md.collect_guard_texts(["x"], target_dir=repo, include_dir_files=True)
+            err = io.StringIO()
+            with self.assertRaises(SystemExit) as cm, redirect_stderr(err):
+                md.sensitive_guard(texts, False, "X")
+            self.assertEqual(cm.exception.code, 3)
+            self.assertIn("没法扫完", err.getvalue())
+            md.sensitive_guard(texts, True, "X")  # --allow-sensitive 放行
 
 
 if __name__ == "__main__":
