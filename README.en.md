@@ -28,7 +28,7 @@ Inspired by a WeChat article by 数字生命卡兹克 (Khazix) on making Claude,
 Requires Python 3.10+, git, Claude Code. Per channel: Gemini CLI (`gemini`), Codex CLI (`codex`), and `DEEPSEEK_API_KEY` for the fast model.
 
 ```bash
-git clone https://github.com/<you>/model-dispatch.git ~/model-dispatch && ~/model-dispatch/install.sh
+git clone https://github.com/hanzo-genji233/model-dispatch.git ~/model-dispatch && ~/model-dispatch/install.sh
 ```
 
 The installer links 5 commands into `~/.local/bin`, links the skill into `~/.claude/skills/`, and imports `rules/CLAUDE.md` from `~/.claude/CLAUDE.md`.

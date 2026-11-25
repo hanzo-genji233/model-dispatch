@@ -47,7 +47,7 @@
 - 快模型：设环境变量 `DEEPSEEK_API_KEY`（或 `FAST_API_KEY`，配合 `fast_base_url` 用别家）。
 
 ```bash
-git clone https://github.com/<你的用户名>/model-dispatch.git ~/model-dispatch
+git clone https://github.com/hanzo-genji233/model-dispatch.git ~/model-dispatch
 ```
 
 ```bash
