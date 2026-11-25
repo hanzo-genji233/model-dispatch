@@ -474,9 +474,20 @@ def _is_model_unsupported(text: str) -> bool:
     return "model_not_found" in low or "is not supported" in low
 
 
-def _codex_errors(err: str) -> str:
+def _codex_errors(err: str, out: str = "") -> str:
+    """找出 Codex 失败的原因。额度用完等报错写在标准输出的 JSON 事件里，不在 stderr。"""
+    msgs: list[str] = []
+    for line in out.splitlines():
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+        if ev.get("type") == "error" and ev.get("message"):
+            msgs.append(ev["message"])
     lines = [l for l in err.splitlines() if re.search(r"\b(error|failed|denied|panic)\b", l, re.I)]
-    return "\n".join(lines)[-800:]
+    if not msgs and not lines and out.strip():
+        lines = out.strip().splitlines()[-3:]
+    return "\n".join(msgs[-1:] + lines)[-800:]
 
 
 def _untracked_summary(wt: Path) -> str:
@@ -555,7 +566,7 @@ def cmd_codex_worker(argv: list[str]) -> int:
     log_job(job, tool="codex-worker", model=used, effort=effort, worktree=str(wt), base=base,
             session=sid, ok=ok, worktree_changed=changed, seconds=round(time.time() - t0))
     if not has_report:
-        die(f"Codex 没交回结果（退出码 {code}）。{_codex_errors(chr(10).join(errs))}\n记录：{job}", code=1)
+        die(f"Codex 没交回结果（退出码 {code}）。{_codex_errors(chr(10).join(errs), out)}\n记录：{job}", code=1)
     if not changed and not a.allow_noop:
         print(report.strip())
         die(f"Codex 交了报告，但工作树一个文件都没变（本来就不用改文件的话加 --allow-noop）。\n会话ID：{sid}  记录：{job}", code=4)
@@ -717,7 +728,7 @@ def cmd_codex_review(argv: list[str]) -> int:
     prompt = f"{REVIEW_RULES}\n\n审查范围：{target}\n\n```diff\n{diff}\n```"
     models: list[str | None] = [a.model] if a.model else (as_list(c.get("codex_models")) or [None])
     t0 = time.time()
-    used, code, errs = models[0], 1, []
+    used, code, errs, out = models[0], 1, [], ""
     for m in models:
         used = m
         code, out, err = run(
@@ -736,7 +747,8 @@ def cmd_codex_review(argv: list[str]) -> int:
     res = parse_review((job / "result.json").read_text() if (job / "result.json").exists() else "")
     fell_back = False
     if res is None and c.get("fallback_to_fast") and not a.no_fallback and fast_key(c):
-        print("[md] Codex 审查没出结果，改由快模型替补审查（它只看得到 diff）", file=sys.stderr)
+        why = _codex_errors(chr(10).join(errs), out).splitlines()
+        print(f"[md] Codex 审查没出结果（{why[0][:160] if why else f'退出码 {code}'}），改由快模型替补审查（它只看得到 diff）", file=sys.stderr)
         try:
             raw = fast_chat(c, f"{prompt}\n\n只输出一个 JSON 对象，符合这个结构，不要别的文字：\n{json.dumps(REVIEW_SCHEMA)}", a.timeout)
             res = parse_review(raw)
@@ -749,7 +761,7 @@ def cmd_codex_review(argv: list[str]) -> int:
     (job / "stderr.txt").write_text("\n\n".join(errs) + "\n")
     if res is None:
         log_job(job, tool="codex-review", model=used, repo=str(repo), branch=branch, round=rnd, ok=False)
-        die(f"审查没返回可读结果（退出码 {code}）。{_codex_errors(chr(10).join(errs))}\n记录：{job}", code=1)
+        die(f"审查没返回可读结果（退出码 {code}）。{_codex_errors(chr(10).join(errs), out)}\n记录：{job}", code=1)
     nb = len(res["blocking"])
     log_job(job, tool="codex-review", model=used, repo=str(repo), branch=branch, round=rnd, effort=effort,
             target=target, ok=True, blocking=nb, suggestions=len(res["suggestions"]), fallback=fell_back,

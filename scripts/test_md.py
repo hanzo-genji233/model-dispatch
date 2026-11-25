@@ -13,6 +13,7 @@ python3 scripts/test_md.py
 7. gemini-ask 的命令模板：没指定模型时去掉 -m；模板里没 {prompt} 就走标准输入
 8. gemini-ask 某个模型额度用完，自动换下一个
 9. 审查结果包在 ```json 里也能读；字段不全判失败
+10. Codex 额度用完的报错在标准输出的 JSON 事件里，失败信息要把它说出来
 """
 from __future__ import annotations
 
@@ -164,6 +165,10 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(ok["blocking"][0]["fix"], "")
         self.assertIsNone(md.parse_review('{"summary":"s"}'))
         self.assertIsNone(md.parse_review("没有 JSON"))
+
+    def test_codex_errors_reads_json_events(self) -> None:
+        out = '{"type":"turn.started"}\n{"type":"error","message":"You have hit your usage limit."}\n'
+        self.assertIn("usage limit", md._codex_errors("Reading additional input from stdin...", out))
 
 
 if __name__ == "__main__":
