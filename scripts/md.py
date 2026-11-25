@@ -177,17 +177,49 @@ def collect_guard_texts(
         resolved = target_dir.resolve()
         if is_git(resolved):
             out.append(git(resolved, "remote", "-v"))
-            if include_dir_files:
-                out.append(git(resolved, "ls-files", "--", str(resolved)))
-                out.append(git(resolved, "ls-files", "--others", "--exclude-standard", "--", str(resolved)))
-        elif include_dir_files:
-            names = []
-            for i, p in enumerate(resolved.rglob("*")):
-                if i >= 1000:
-                    break
-                names.append(p.name)
-            out.append("\n".join(names))
+        if include_dir_files and as_list(cfg().get("sensitive_markers")):
+            out.extend(_dir_texts(resolved))
     return out
+
+
+# 目录内容扫描上限：外部模型能在目录里读到的文件，名字和内容都要过敏感词
+_SCAN_MAX_FILES = 5000
+_SCAN_MAX_FILE_BYTES = 1_000_000
+_SCAN_MAX_TOTAL_BYTES = 50_000_000
+_SCAN_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache"}
+
+
+def _dir_texts(root: Path) -> list[str]:
+    """目录里的文件名 + 文本文件内容（含 gitignore 掉的文件，模型一样读得到）。跳过二进制和超大文件。"""
+    names: list[str] = []
+    contents: list[str] = []
+    total = 0
+    count = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SCAN_SKIP_DIRS]
+        names.append(os.path.relpath(dirpath, root))
+        for fn in filenames:
+            count += 1
+            if count > _SCAN_MAX_FILES:
+                contents.append("\n".join(names))
+                print(f"[md] 敏感词扫描：目录文件超过 {_SCAN_MAX_FILES} 个，只扫了前面的部分", file=sys.stderr)
+                return contents
+            names.append(fn)
+            fp = Path(dirpath) / fn
+            try:
+                if fp.is_symlink() or fp.stat().st_size > _SCAN_MAX_FILE_BYTES:
+                    continue
+                if total >= _SCAN_MAX_TOTAL_BYTES:
+                    continue
+                data = fp.read_bytes()
+            except OSError:
+                continue
+            if b"\x00" in data[:8192]:
+                continue  # 二进制
+            total += len(data)
+            contents.append(data.decode("utf-8", errors="ignore"))
+    contents.append("\n".join(names))
+    return contents
 
 
 def sensitive_guard(texts: list[str], allowed: bool, who: str) -> None:

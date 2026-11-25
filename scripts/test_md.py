@@ -14,6 +14,7 @@ python3 scripts/test_md.py
 8. gemini-ask 某个模型额度用完，自动换下一个
 9. 审查结果包在 ```json 里也能读；字段不全判失败
 10. Codex 额度用完的报错在标准输出的 JSON 事件里，失败信息要把它说出来
+11. 敏感词藏在目录里某个文件的正文里（文件名不含、甚至被 gitignore），也要拦住
 """
 from __future__ import annotations
 
@@ -169,6 +170,25 @@ class GuardTests(unittest.TestCase):
     def test_codex_errors_reads_json_events(self) -> None:
         out = '{"type":"turn.started"}\n{"type":"error","message":"You have hit your usage limit."}\n'
         self.assertIn("usage limit", md._codex_errors("Reading additional input from stdin...", out))
+
+    def test_sensitive_in_dir_file_content(self) -> None:
+        repo = self.root / "proj2"
+        init_repo(repo)
+        (repo / "docs").mkdir()
+        (repo / "docs" / "会议.md").write_text("今天和 Globex 开会")
+        (repo / ".gitignore").write_text("secret.env\n")
+        (repo / "secret.env").write_text("TOKEN_OWNER=initech")
+        (repo / "logo.png").write_bytes(b"\x89PNG\x00\x00globex")
+        self.write_cfg(sensitive_markers=["globex"])
+        with self.assertRaises(SystemExit) as cm, redirect_stderr(io.StringIO()):
+            md.sensitive_guard(md.collect_guard_texts(["按 docs/会议.md 整理需求"], target_dir=repo, include_dir_files=True), False, "X")
+        self.assertEqual(cm.exception.code, 3)
+        self.write_cfg(sensitive_markers=["initech"])  # gitignore 掉的文件模型也读得到
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            md.sensitive_guard(md.collect_guard_texts(["x"], target_dir=repo, include_dir_files=True), False, "X")
+        (repo / "docs" / "会议.md").write_text("普通内容")
+        self.write_cfg(sensitive_markers=["globex"])  # 只在二进制里出现：不拦
+        md.sensitive_guard(md.collect_guard_texts(["x"], target_dir=repo, include_dir_files=True), False, "X")
 
 
 if __name__ == "__main__":

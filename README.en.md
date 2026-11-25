@@ -20,7 +20,7 @@ Inspired by a WeChat article by 数字生命卡兹克 (Khazix) on making Claude,
 - Changes touch money, auth or outgoing messages → review uses the deep reasoning tier.
 - Endless fix/review loops → rounds are counted; after round 2 the decision goes back to you.
 - Codex is down → the fast model reviews the diff instead, flagged as a fallback.
-- Client data sent by accident → configurable `sensitive_markers` block the call (exit code 3).
+- Client data sent by accident → configurable `sensitive_markers` are matched against the task, named files, and the names and contents of text files in the target directory; a hit blocks the call (exit code 3).
 - Every job is logged; `md-jobs` lists them.
 
 ## Install
